@@ -23,4 +23,4 @@ Harder things:
 # TODO
 
 * Help users avoid creating many temporary files
-
+* Avoid needing || Automate adding - `gitalyze/bin` to $PATH
