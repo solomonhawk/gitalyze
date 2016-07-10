@@ -1,8 +1,46 @@
 #!/bin/bash
 #
-# Performs mapping of functions across commits in a .git repository.
-#
 # @author Solomon Hawk <solomon.hawk@viget.com>
+#
+# Performs mapping of functions across commits in a .git repository. See usage
+# definition below for opions.
+
+# revision string to inspect, default declared later due to
+# dependency on having successfully checked out git repository
+REVISION=''
+
+# The default .git repository is the dir this script was invoked from
+REPOSITORY=`pwd`
+
+VERBOSE=false                    # by default verbose mode is off
+USER_REVISION=''                 # user provided revision
+ROOT_DIR='.gitalyze'             # default name of gitalyze directory
+REPO_DIR="${ROOT_DIR}/repo"      # default name of repo directory
+TMP_DIR="${ROOT_DIR}/tmp"        # default name of temp directory
+BRANCH='master'                  # default to master branch
+IGNORED_DIRS='*.git *node_modules' # default to ignoring .git and node_modules
+BEFORE_COMMIT=''                 # run before analyzing a commit
+EACH_FILE=''                     # run on each file in a commit
+AFTER_COMMIT=''                  # run after analysis of a commit
+AFTER_ALL=''                     # run after all steps
+LOG=/dev/null                    # by default log to /dev/null
+
+#######################################
+# Main program entry point
+#######################################
+main() {
+  log "Logging to \"${LOG}\""
+
+  create_root_gitalyze_directory
+  clear_temp_and_repo_dirs
+  clone_git_repository
+  set_revision_range
+  collect_commit_hashes
+  do_hashes
+
+  # TODO(shawk): re-enable this when things settle down
+  # clear_temp_and_repo_dirs
+}
 
 read -d '' HELP <<-EOF
   Usage: $0 [options]
@@ -11,37 +49,27 @@ read -d '' HELP <<-EOF
       -t FOLDER_PATH         Path to the temp directory.               (t - temp)
       -f EXECUTABLE_PATH     Run before analysis of each commit.       (f - before)
       -e EXECUTABLE_PATH     Run on each file in each commit.          (e - each)
-                               Note: may run on .gitignored files, but
-                               not on the .git directory itself.
+                                 Note: may run on .gitignored files, but
+                                 not on the .git directory itself.
       -a EXECUTABLE_PATH     Run after analysis of each commit.        (a - after)
       -d EXECUTABLE_PATH     Run after all commits are analyzed.       (d - done)
       -p GIT_PROJECT_PATH    Path or URL to 'git clone' for analysis.  (p - project/path)
+      -x IGNORED_DIRS        List of files to ignore.                  (x - exclude)
+
+      -l LOG_PATH            Path to log output file.
       -v                     Turn on verbose mode.
       -l                     Redirect location for log output.
 
       -h                     Print this usage message.
 EOF
 
-# the default .git repository is the
-# dir this script was invoked from
-REPOSITORY=`pwd`
-
-VERBOSE=false
-REVISION=''                # revision string to inspect
-USER_REVISION=''           # user provided revision
-ROOT_DIR='.gitalyze'       # default name of gitalyze directory
-REPO_DIR="$ROOT_DIR/repo"  # default name of repo directory
-TMP_DIR="$ROOT_DIR/tmp"   # default name of temp directory
-BRANCH='master'            # default to master branch
-BEFORE_COMMIT=''           # run before analyzing a commit
-EACH_FILE=''               # run on each file in a commit
-AFTER_COMMIT=''            # run after analysis of a commit
-AFTER_ALL=''               # run after all steps
-LOG=/dev/null              # by default log to /dev/null
-
 # expand $HOME in path
 expand_path() {
   echo `sh -c "echo $1"`
+}
+
+absolute_path() {
+  echo $(cd "$(dirname ${1})"; pwd)/$(basename ${1})
 }
 
 # print usage text
@@ -49,8 +77,8 @@ usage() {
   echo "${HELP}"
 }
 
-# parse options
-while getopts 'a:b:d:e:f:l:p:r:t:hv' flag; do
+# parse flags
+while getopts 'a:b:d:e:f:l:p:r:t:x:hv' flag; do
   case "${flag}" in
     a) AFTER_COMMIT="${OPTARG}" ;;
     b) BRANCH="${OPTARG}" ;;
@@ -61,42 +89,59 @@ while getopts 'a:b:d:e:f:l:p:r:t:hv' flag; do
     p) REPOSITORY="${OPTARG}" ;;
     r) USER_REVISION="${OPTARG}" ;;
     t) TMP_DIR="${OPTARG}" ;;
+    x) IGNORED_DIRS+=" ${OPTARG}" ;;
     v) VERBOSE=true ;;
     h|*) usage; exit 0 ;;
   esac
 done
+
+# print usage if no arguments/flags provided
+if [ ${#} -eq 0 ]; then
+  usage
+  exit
+fi
+
+# ensure git is available
+if [ ! $(which git) ]; then
+  echo "Git must be installed to use this program"
+  exit 1
+fi
 
 # expand temp directory path
 ROOT_DIR=$(expand_path "$HOME/${ROOT_DIR}")
 REPO_DIR=$(expand_path "$HOME/${REPO_DIR}")
 TMP_DIR=$(expand_path "$HOME/${TMP_DIR}")
 
+# if LOG has been redefined from the default /dev/null, get the absolute path
 if [ ${LOG} != /dev/null ]; then
   if [ ! -f ${LOG} ]; then
     touch ${LOG}
   fi
 
-  LOG="$(cd "$(dirname ${LOG})"; pwd)/$(basename ${LOG})"
-
-  if [ ${VERBOSE} == true ]; then
-    echo "Logging to \"${LOG}\"."
-  fi
+  # determine absolute path to log file
+  LOG="$(absolute_path "${LOG}")"
 fi
 
 # set environment variables
+export GITALYZE_REPOSITORY=${REPOSITORY}
 export GITALYZE_VERBOSE=${VERBOSE}
 export GITALYZE_ROOT_DIR=${ROOT_DIR}
 export GITALYZE_REPO_DIR=${REPO_DIR}
 export GITALYZE_TMP_DIR=${TMP_DIR}
 export GITALYZE_LOG=${LOG}
+# export GITALYZE_REVISION -- defined below
 
 #######################################
 # Functions
 #######################################
 
+log() {
+  gz.log "$1"
+}
+
 # clear out the temp directory
-create_root_dir() {
-  echo "Creating root directory \"${ROOT_DIR}\"." >> $GITALYZE_LOG
+create_root_gitalyze_directory() {
+  log "Creating root directory \"${ROOT_DIR}\""
 
   if [ ! -d ${ROOT_DIR} ]; then
     mkdir ${ROOT_DIR}
@@ -106,30 +151,27 @@ create_root_dir() {
 # clear out the temp directory
 clear_temp_and_repo_dirs() {
   if [ -d ${TMP_DIR} ]; then
-    echo "Clearing temp directory \"${TEMP_DIR}\"." >> $GITALYZE_LOG
+    log "Clearing temp directory \"${TMP_DIR}\""
     rm -rf ${TMP_DIR}/*
   else
-    echo "Creating temp directory \"${TMP_DIR}\"." >> $GITALYZE_LOG
+    log "Creating temp directory \"${TMP_DIR}\""
     mkdir ${TMP_DIR}
   fi
 
   if [ -d ${REPO_DIR} ]; then
-    echo "Clearing the repository directory \"${REPO_DIR}\"." >> $GITALYZE_LOG
+    log "Clearing the repository directory \"${REPO_DIR}\""
     rm -rf ${REPO_DIR}
   fi
 }
 
 # clone the repo into REPO_DIR
 clone_git_repository() {
-  local msg="Cloning: \"${REPOSITORY}\""
-
-  echo $msg >> $GITALYZE_LOG
+  log "Cloning: \"${REPOSITORY}\" into \"${REPO_DIR}\""
 
   if [ ${VERBOSE} == true ]; then
-    echo $msg
-    $(git clone $REPOSITORY ${REPO_DIR})
+    $(git clone -q ${REPOSITORY} ${REPO_DIR}) | tee -a $GITALYZE_LOG
   else
-    $(git clone $REPOSITORY ${REPO_DIR} &>$GITALYZE_LOG)
+    $(git clone ${REPOSITORY} ${REPO_DIR} &>$GITALYZE_LOG)
   fi
 }
 
@@ -138,46 +180,48 @@ clone_git_repository() {
 # If the user does not provide a revision string, use
 # all commits in the selected branch.
 set_revision_range() {
-  echo "Checking revision range." >> $GITALYZE_LOG
-
-  local msg="Checking out ${BRANCH}."
+  log "Checking revision range"
 
   if [ ! -z "${USER_REVISION}" ]; then
-    echo "User revision supplied." >> $GITALYZE_LOG
+    log "User revision supplied"
 
     REVISION=${USER_REVISION}
 
+    # checkout the provided branch if present and not already checked out
     if [ "$(git rev-parse --abbrev-ref HEAD)" != "${BRANCH}" ]; then
+      log "Checking out \"${BRANCH}\""
+
       if [ ${VERBOSE} == true ]; then
-        echo ${msg}
         $(git checkout -f ${BRANCH})
       else
-        echo ${msg} >> $GITALYZE_LOG
-        $(git checkout -fq ${BRANCH} 2>$GITALYZE_LOG)
+        $(git checkout -fq ${BRANCH} 2> $GITALYZE_LOG)
       fi
     fi
   else
     REVISION=$(git rev-list --max-parents=0 HEAD)..HEAD
-    echo "No user revision specified, defaulting to ${REVISION}." >> $GITALYZE_LOG
+    log "No user revision specified, defaulting to \"${REVISION}\""
   fi
 
   if [ ${VERBOSE} == true ]; then
     echo "Using revision range: \"${REVISION}\"" | tee -a $GITALYZE_LOG
   fi
+
+  # export GITALYZE_REVISION environment variable
+  export GITALYZE_REVISION=${REVISION}
 }
 
 # Using git rev-list, extract a full list of commit hashes
 # in the provided revision range inclusive of the first commit.
 # This yields a space-separated string of commits with a "-"
 # prepended to the first line which is removed with sed below.
-collect_commit_hash_list() {
+collect_commit_hashes() {
   cd ${REPO_DIR}
 
   # http://stackoverflow.com/a/17600090/4611471
-  if hashes=$(git rev-list --reverse ${REVISION} --boundary 2>/dev/null); then
-    hashes=$(echo $hashes | sed s/-//)
+  if hashes=$(git rev-list --reverse ${REVISION} --boundary --remove-empty 2>/dev/null); then
+    hashes=$(echo ${hashes} | sed s/-//)
   else
-    echo "Bad revision argument provided. Check that you can run 'git rev-list ${REVISION}' in your repository without errors." >&2
+    log "Bad revision argument provided, check that you can run 'git rev-list ${REVISION}' in your repository without errors"
     exit 1
   fi
 }
@@ -185,48 +229,80 @@ collect_commit_hash_list() {
 # loop through hashes executing user programs
 do_hashes () {
   for hash in ${hashes}; do
+    log "Checking out \"${hash}\""
+
     # checkout the commit with this hash
     if [ ${VERBOSE} == true ]; then
-      $(git checkout -f ${hash})
+      $(git checkout -f ${hash} 2>$GITALYZE_LOG)
     else
       $(git checkout -fq ${hash})
     fi
 
-    # run the BEFORE_COMMIT script
+    # run the before-commit scripts if provided in background-processes
+    # concurrently, waiting for all to complete before proceeding
     if [ ! -z ${BEFORE_COMMIT} ]; then
-      ${BEFORE_COMMIT} ${hash}
-    fi
+      log "Running before-commit hooks for \"${hash}\""
 
-    # run the EACH_FILE program on each file if provided
-    if [ ! -z ${EACH_FILE} ]; then
-      for file in $(find . -name '*' -not -path '*.git*'); do
-        ${EACH_FILE} ${hash} ${file}
+      for process in ${BEFORE_COMMIT}; do
+        ${BEFORE_COMMIT} ${hash} &
       done
+      wait
     fi
 
-    # run the AFTER_COMMIT program if provided
+    # run the each-file program on each file if provided in background-
+    # processes concurrently, waiting for all to complete before proceeding
+    if [ ! -z ${EACH_FILE} ]; then
+      local files
+      local exclude_paths
+
+      log "Running each-file hooks for \"${hash}\""
+
+      # allow literal strings (avoids shell expansion of * in below find command)
+      set -f
+
+      exclude_paths=$(for e in ${IGNORED_DIRS}; do echo "-path '${e}' -o "; done)
+      exclude_paths=$(echo ${exclude_paths} | sed -e "s/[[:space:]]-o$//")
+
+      # safe and appropriate use of eval to execute command as a whole which
+      # avoids issues with expansion order. Prune is much better than grep -v or
+      # ! -path <path> flags since it prevents traversal of subtrees which, for
+      # .git and node_modules could be fairly big
+      files=$(eval "find . -name '*' \( ${exclude_paths} \) -prune -o -print -type f")
+
+      # restore f flag
+      set +f
+
+      for file in ${files}; do
+        for process in ${EACH_FILE}; do
+          ${process} ${hash} ${file} &
+        done
+      done
+      wait
+    fi
+
+    # run the after-commit program if provided in background-processes
+    # concurrently, waiting for all to complete before proceeding
     if [ ! -z ${AFTER_COMMIT} ]; then
-      ${AFTER_COMMIT} {hash}
+      log "Running after-commit hooks for \"${hash}\""
+
+      for process in ${AFTER_COMMIT}; do
+        ${process} ${hash} &
+      done
+      wait
     fi
   done
 
-  # run the AFTER_COMMIT program if provided
+  # run the after-all program if provided in background-processes
+  # concurrently, waiting for all to complete before proceeding
   if [ ! -z ${AFTER_ALL} ]; then
-    ${AFTER_ALL} {hash}
+    log "Running after-all hooks"
+
+    for process in ${AFTER_ALL}; do
+      ${process} ${hashes} &
+    done
+    wait
   fi
 }
 
-#######################################
-# Main program entry point
-#######################################
-main() {
-  create_root_dir
-  clear_temp_and_repo_dirs
-  clone_git_repository
-  set_revision_range
-  collect_commit_hash_list
-  do_hashes
-  # clear_temp_and_repo_dirs
-}
-
+# execute
 main

@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# @author Solomon Hawk <solomon.hawk@viget.com>
+#
+# Sample each-file gitalyze hook script demoing computing file sizes for every
+# file in a repository, saving data to the temp directory.
+#
+# Use this hook to do computations that require visiting every (or many) files
+# in the repository.
+
+main() {
+  # the hash of the current commit is
+  # passed in the first argument position
+  local hash=${1}
+  local pfx=${hash[@]:0:8}
+
+  # the relative path to the file in the repository
+  # is passed in the second argument position
+  local filepath=${2}
+  local skip=false
+  local filename
+  local size
+
+  # set skip flag if '.' or '..'
+  if [[ ${filepath} =~ (\.$|\.\.$) ]]; then
+    skip=true
+  fi
+
+  # skip directories, '.' and '..'
+  if [ \( ! -d "${filepath}" \) -a \( ${skip} == false \) ]; then
+    gz.log "${pfx} Checking file size of \"${filepath}\""
+
+    # calculate filesize
+    size=$(wc -c < $filepath)
+
+    # compute filename for temp file
+    filename="$GITALYZE_TMP_DIR/$(echo $filepath | sed s/^.// | sed s/\\//__/g).txt"
+
+    # if the temp file doesn't exist, create it
+    if [ ! -f ${filename} ]; then
+      touch ${filename}
+
+      gz.log "${pfx} Creating temporary file: \"${filename}\""
+    fi
+
+    # write the hash and size to the temp file
+    echo ${hash}:${size} >> ${filename}
+  fi
+}
+
+main ${@}

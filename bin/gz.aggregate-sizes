@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# @author Solomon Hawk <solomon.hawk@viget.com>
+#
+# Sample script for gitalyze demonstrating an after-all operation.
+#
+# Use this hook to do any setup work that is required prior to analyzing
+# the repository at the current commit hash such as building compiled files
+# or installing dependencies.
+
+main() {
+  # the complete list of hashes is passed to an after-all program
+  local hashes="${1}"
+  local complete_msg="Analysis completed for \""$GITALYZE_REPOSITORY"\" from \""$GITALYZE_REVISION"\"."
+
+  gz.log "${complete_msg}"
+}
+
+main ${@}

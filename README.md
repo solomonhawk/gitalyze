@@ -6,7 +6,6 @@ Gitalyze is a general purpose utility for mapping programs across commits in a [
 
 - bash
 - [git](https://git-scm.com/)
-- [jq](https://stedolan.github.io/jq/)
 
 # Setup
 

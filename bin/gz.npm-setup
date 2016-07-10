@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# @author Solomon Hawk <solomon.hawk@viget.com>
+#
+# Sample script for gitalyze demonstrating an some example use cases for the
+# "before-commit" hook.
+#
+# Use this hook to do any setup work that is required prior to analyzing the
+# repository at the current commit hash such as building compiled files or
+# installing dependencies.
+
+main() {
+  # the hash of the current commit is passed to
+  # this script in the first argument position
+  local hash=${1}
+  local pfx=${hash[@]:0:8}
+
+  gz.log "${pfx} Cleaning node modules directory"
+
+  rm -rf node_modules/*
+
+  gz.log "${pfx} Installing node modules"
+
+  if [ $GITALYZE_VERBOSE == true ]; then
+    npm install --loglevel=error --progress=true 2>&1 >/dev/null
+  else
+    # log errors only, redirect stdout to null and stderr to log file
+    npm install --loglevel=error >/dev/null 2> $GITALYZE_LOG
+  fi
+
+  gz.log "${pfx} npm-setup completed"
+}
+
+main ${@}

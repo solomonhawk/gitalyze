@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# @author Solomon Hawk <solomon.hawk@viget.com>
+#
+# Sample script for gitalyze showing the measurement of build times.
+#
+# Use this hook to do any setup work that you want to do once per commit in the
+# provided revision range.
+
+main() {
+  # the hash of the current commit is
+  # passed in the first argument position
+  local hash=${1}
+  local pfx=${hash[@]:0:8}
+
+  # the file to store build time data in for this commit
+  local filename="$GITALYZE_TMP_DIR/${hash}.txt"
+
+  gz.log "${pfx} Timing \`npm run build:production\`"
+
+  # time the build command and write the real time to a temp file
+  { time $(npm run build:production); } 2>&1 \
+    | grep real \
+    | awk '{print $2}' > ${filename}
+
+  gz.log "${pfx} Timing finished"
+}
+
+main ${@}
