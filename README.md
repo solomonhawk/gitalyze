@@ -32,17 +32,16 @@ For now it's required that you add the path of the `gitalyze/bin` folder to your
 
       -l LOG_PATH            Path to log output file.
       -v                     Turn on verbose mode.
-      -l                     Redirect location for log output.
 
       -h                     Print this usage message.
 
 # Example
 
     $ gitalyze -p git@github.com:solomonhawk/gifs-to-gifs.git \
-               -r ba4c9ff..HEAD 
-               -f gz.before 
-               -e gz.file-size 
-               -d gz.after 
+               -r ba4c9ff..HEAD \
+               -f gz.before \
+               -e gz.file-size \
+               -d gz.after \
                -l log.txt
 
 You can specify multiple programs to execute for each hook:
