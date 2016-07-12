@@ -189,22 +189,14 @@ set_revision_range() {
 
     # checkout the provided branch if present and not already checked out
     if [ "$(git rev-parse --abbrev-ref HEAD)" != "${BRANCH}" ]; then
-      log "Checking out \"${BRANCH}\""
-
-      if [ ${VERBOSE} == true ]; then
-        $(git checkout -f ${BRANCH})
-      else
-        $(git checkout -fq ${BRANCH} 2> $GITALYZE_LOG)
-      fi
+      checkout "${BRANCH}"
     fi
   else
     REVISION=$(git rev-list --max-parents=0 HEAD)..HEAD
     log "No user revision specified, defaulting to \"${REVISION}\""
   fi
 
-  if [ ${VERBOSE} == true ]; then
-    echo "Using revision range: \"${REVISION}\"" | tee -a $GITALYZE_LOG
-  fi
+  log "Using revision range: \"${REVISION}\""
 
   # export GITALYZE_REVISION environment variable
   export GITALYZE_REVISION=${REVISION}
@@ -229,71 +221,85 @@ collect_commit_hashes() {
 # loop through hashes executing user programs
 do_hashes () {
   for hash in ${hashes}; do
-    log "Checking out \"${hash}\""
-
-    # checkout the commit with this hash
-    if [ ${VERBOSE} == true ]; then
-      $(git checkout -f ${hash} 2>$GITALYZE_LOG)
-    else
-      $(git checkout -fq ${hash})
-    fi
-
-    # run the before-commit scripts if provided in background-processes
-    # concurrently, waiting for all to complete before proceeding
-    if [ ! -z ${BEFORE_COMMIT} ]; then
-      log "Running before-commit hooks for \"${hash}\""
-
-      for process in ${BEFORE_COMMIT}; do
-        ${BEFORE_COMMIT} ${hash} &
-      done
-      wait
-    fi
-
-    # run the each-file program on each file if provided in background-
-    # processes concurrently, waiting for all to complete before proceeding
-    if [ ! -z ${EACH_FILE} ]; then
-      local files
-      local exclude_paths
-
-      log "Running each-file hooks for \"${hash}\""
-
-      # allow literal strings (avoids shell expansion of * in below find command)
-      set -f
-
-      exclude_paths=$(for e in ${IGNORED_DIRS}; do echo "-path '${e}' -o "; done)
-      exclude_paths=$(echo ${exclude_paths} | sed -e "s/[[:space:]]-o$//")
-
-      # safe and appropriate use of eval to execute command as a whole which
-      # avoids issues with expansion order. Prune is much better than grep -v or
-      # ! -path <path> flags since it prevents traversal of subtrees which, for
-      # .git and node_modules could be fairly big
-      files=$(eval "find . -name '*' \( ${exclude_paths} \) -prune -o -print -type f")
-
-      # restore f flag
-      set +f
-
-      for file in ${files}; do
-        for process in ${EACH_FILE}; do
-          ${process} ${hash} ${file} &
-        done
-      done
-      wait
-    fi
-
-    # run the after-commit program if provided in background-processes
-    # concurrently, waiting for all to complete before proceeding
-    if [ ! -z ${AFTER_COMMIT} ]; then
-      log "Running after-commit hooks for \"${hash}\""
-
-      for process in ${AFTER_COMMIT}; do
-        ${process} ${hash} &
-      done
-      wait
-    fi
+    checkout "${hash}"
+    do_before_commit "${hash}"
+    do_each_file "${hash}"
+    do_after_commit "${hash}"
   done
 
-  # run the after-all program if provided in background-processes
-  # concurrently, waiting for all to complete before proceeding
+  do_after_all "${hashes}"
+}
+
+# run the before-commit scripts if provided in background-processes
+# concurrently, waiting for all to complete before proceeding
+do_before_commit () {
+  local hash="${1}"
+
+  if [ ! -z ${BEFORE_COMMIT} ]; then
+    log "Running before-commit hooks for \"${hash}\""
+
+    for process in ${BEFORE_COMMIT}; do
+      ${process} ${hash} &
+    done
+    wait
+  fi
+}
+
+# run the each-file program on each file if provided in background-
+# processes concurrently, waiting for all to complete before proceeding
+do_each_file () {
+  local hash="${1}"
+
+  if [ ! -z ${EACH_FILE} ]; then
+    local files
+    local exclude_paths
+
+    log "Running each-file hooks for \"${hash}\""
+
+    # allow literal strings (avoids shell expansion of * in below find command)
+    set -f
+
+    exclude_paths=$(for e in ${IGNORED_DIRS}; do echo "-path '${e}' -o "; done)
+    exclude_paths=$(echo ${exclude_paths} | sed -e "s/[[:space:]]-o$//")
+
+    # safe and appropriate use of eval to execute command as a whole which
+    # avoids issues with expansion order. Prune is much better than grep -v or
+    # ! -path <path> flags since it prevents traversal of subtrees which, for
+    # .git and node_modules could be fairly big
+    files=$(eval "find . -name '*' \( ${exclude_paths} \) -prune -o -print -type f")
+
+    # restore f flag
+    set +f
+
+    for file in ${files}; do
+      for process in ${EACH_FILE}; do
+        ${process} ${hash} ${file} &
+      done
+    done
+    wait
+  fi
+}
+
+# run the after-commit program if provided in background-processes
+# concurrently, waiting for all to complete before proceeding
+do_after_commit () {
+  local hash="${1}"
+
+  if [ ! -z ${AFTER_COMMIT} ]; then
+    log "Running after-commit hooks for \"${hash}\""
+
+    for process in ${AFTER_COMMIT}; do
+      ${process} ${hash} &
+    done
+    wait
+  fi
+}
+
+# run the after-all program if provided in background-processes
+# concurrently, waiting for all to complete before proceeding
+do_after_all () {
+  local hashes="${1}"
+
   if [ ! -z ${AFTER_ALL} ]; then
     log "Running after-all hooks"
 
@@ -301,6 +307,18 @@ do_hashes () {
       ${process} ${hashes} &
     done
     wait
+  fi
+}
+
+checkout () {
+  local target="${1}"
+
+  log "Checking out \"${target}\""
+
+  if [ ${VERBOSE} == true ]; then
+    $(git checkout -f ${target})
+  else
+    $(git checkout -fq ${target} 2> $GITALYZE_LOG)
   fi
 }
 
