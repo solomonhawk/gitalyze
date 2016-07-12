@@ -8,9 +8,8 @@
 # provided revision range.
 
 main() {
-  # the hash of the current commit is
-  # passed in the first argument position
-  local hash=${1}
+  # the hash of the current commit is passed in the first argument position
+  local hash="${1}"
   local pfx=${hash[@]:0:8}
 
   # the file to store build time data in for this commit
@@ -26,4 +25,4 @@ main() {
   gz.log "${pfx} Timing finished"
 }
 
-main ${@}
+main "${@}"

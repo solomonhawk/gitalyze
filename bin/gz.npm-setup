@@ -31,4 +31,4 @@ main() {
   gz.log "${pfx} npm-setup completed"
 }
 
-main ${@}
+main "${@}"

@@ -2,8 +2,8 @@
 
 if [ $GITALYZE_LOG ]; then
   if [ $GITALYZE_VERBOSE == true ]; then
-    echo ${1} | tee -a $GITALYZE_LOG
+    echo "${1}" | tee -a $GITALYZE_LOG
   else
-    echo ${1} >> $GITALYZE_LOG
+    echo "${1}" >> $GITALYZE_LOG
   fi
 fi

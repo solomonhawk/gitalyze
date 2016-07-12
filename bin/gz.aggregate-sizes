@@ -16,4 +16,4 @@ main() {
   gz.log "${complete_msg}"
 }
 
-main ${@}
+main "${@}"

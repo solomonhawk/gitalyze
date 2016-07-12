@@ -11,12 +11,12 @@
 main() {
   # the hash of the current commit is
   # passed in the first argument position
-  local hash=${1}
+  local hash="${1}"
   local pfx=${hash[@]:0:8}
 
   # the relative path to the file in the repository
   # is passed in the second argument position
-  local filepath=${2}
+  local filepath="${2}"
   local skip=false
   local filename
   local size
@@ -48,4 +48,4 @@ main() {
   fi
 }
 
-main ${@}
+main "${@}"
